@@ -296,7 +296,7 @@ def create_download_zip(processed_files):
     zip_buffer.seek(0)
     return zip_buffer
 
-def display_pdf_preview(pdf_bytes, width=600):
+def display_pdf_preview(pdf_bytes, width=800):
     """Muestra una vista previa rápida del PDF como imagen (solo primera página)"""
     try:
         pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
