@@ -283,6 +283,18 @@ def get_position_settings():
             subsistema_y = st.number_input("SUB SISTEMA Y", value=140.0, step=1.0)
         position_settings['custom_positions']['subsistema'] = {'x': subsistema_x, 'y': subsistema_y}
     
+    # 🔥 NUEVA SECCIÓN: Control de zoom para vista previa
+    st.sidebar.header("🔍 Ajustes de Vista Previa")
+    zoom_level = st.sidebar.slider(
+        "Nivel de zoom:",
+        min_value=1.0,
+        max_value=3.0,
+        value=2.0,
+        step=0.5,
+        help="Ajusta el nivel de zoom para la vista previa de PDF"
+    )
+    position_settings['zoom_level'] = zoom_level
+    
     return position_settings
 
 def create_download_zip(processed_files):
@@ -296,28 +308,28 @@ def create_download_zip(processed_files):
     zip_buffer.seek(0)
     return zip_buffer
 
-def display_pdf_preview(pdf_bytes, width=1200):
+def display_pdf_preview(pdf_bytes, width=600, zoom=2.0):
     """Muestra una vista previa rápida del PDF como imagen (solo primera página)"""
     try:
         pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
         
         # Convertir primera página a imagen
         page = pdf_document[0]
-        mat = fitz.Matrix(4.0, 4.0)  # Zoom para mejor calidad
+        mat = fitz.Matrix(zoom, zoom)  # 🔥 ZOOM AJUSTABLE
         pix = page.get_pixmap(matrix=mat)
         img_data = pix.tobytes("png")
         
         pdf_document.close()
         
         # Mostrar imagen
-        st.image(img_data, caption="Vista previa rápida - Primera página", width=width)
+        st.image(img_data, caption=f"Vista previa rápida - Zoom: {zoom}x", width=width)
         return True
         
     except Exception as e:
         st.error(f"Error generando vista previa: {str(e)}")
         return False
 
-def show_quick_preview(processed_files):
+def show_quick_preview(processed_files, zoom_level=2.0):
     """Muestra una vista rápida de los archivos procesados con navegación integrada"""
     st.header("👀 Vista Rápida de Resultados")
     
@@ -341,9 +353,9 @@ def show_quick_preview(processed_files):
     col_preview, col_info = st.columns([2, 1])
     
     with col_preview:
-        # Vista previa rápida
+        # Vista previa rápida CON ZOOM
         st.markdown(f"**📄 {current_file['filename']}**")
-        if display_pdf_preview(current_file['bytes'], width=500):
+        if display_pdf_preview(current_file['bytes'], width=500, zoom=zoom_level):
             st.success("✅ Vista previa generada correctamente")
     
     with col_info:
@@ -617,6 +629,7 @@ def main():
             else:
                 st.write(f"Offsets: X={position_settings['x_offset']}, Y={position_settings['y_offset']}")
             st.write(f"Tamaño de fuente: {position_settings['font_size']}")
+            st.write(f"Zoom vista previa: {position_settings.get('zoom_level', 2.0)}x")
             
             # Botón de procesamiento
             if st.button("🚀 Iniciar Procesamiento", type="primary", key="process_btn"):
@@ -635,8 +648,8 @@ def main():
                 
                 st.success(f"✅ {len(processed_files)} archivos procesados exitosamente")
                 
-                # Vista rápida con navegación integrada
-                show_quick_preview(processed_files)
+                # Vista rápida con navegación integrada Y ZOOM
+                show_quick_preview(processed_files, zoom_level=position_settings.get('zoom_level', 2.0))
                 
                 # Descargas masivas
                 st.header("6. 📥 Descargar Todos los Archivos")
