@@ -1,3 +1,4 @@
+PyMuPDF>=1.23.0
 streamlit>=1.28.0
 pdfplumber>=0.10.0
 reportlab>=4.0.0
