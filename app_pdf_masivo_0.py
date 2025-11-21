@@ -318,7 +318,7 @@ def display_pdf_preview(pdf_bytes, width=600):
         return False
 
 def show_quick_preview(processed_files):
-    """Muestra una vista rápida de los archivos procesados"""
+    """Muestra una vista rápida de los archivos procesados con navegación integrada"""
     st.header("👀 Vista Rápida de Resultados")
     
     if not processed_files:
@@ -337,49 +337,64 @@ def show_quick_preview(processed_files):
     current_index = st.session_state.current_preview_index
     current_file = processed_files[current_index]
     
-    # Información básica del archivo
-    st.subheader(f"📄 Archivo: {current_file['filename']}")
+    # Crear dos columnas: una para la vista previa y otra para la información/navegación
+    col_preview, col_info = st.columns([2, 1])
     
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.info(f"**ACONEX:** {current_file['aconex']}")
-    with col2:
-        st.info(f"**SISTEMA:** {current_file['sistema']}")
-    with col3:
-        st.info(f"**SUB SISTEMA:** {current_file['subsistema']}")
+    with col_preview:
+        # Vista previa rápida
+        st.markdown(f"**📄 {current_file['filename']}**")
+        if display_pdf_preview(current_file['bytes'], width=500):
+            st.success("✅ Vista previa generada correctamente")
     
-    # Vista previa rápida
-    st.markdown("**🖼️ Vista Previa:**")
-    if display_pdf_preview(current_file['bytes'], width=700):
-        st.success("✅ Vista previa generada correctamente")
-    
-    # Navegación mejorada
-    st.markdown("---")
-    st.markdown("**Navegación entre archivos:**")
-    
-    col1, col2, col3, col4 = st.columns([1, 1, 2, 1])
-    
-    with col1:
-        if st.button("⏮️ Primero", use_container_width=True):
-            st.session_state.current_preview_index = 0
-            st.rerun()
-    
-    with col2:
-        if st.button("◀️ Anterior", use_container_width=True):
-            if st.session_state.current_preview_index > 0:
-                st.session_state.current_preview_index -= 1
-                st.rerun()
-    
-    with col3:
+    with col_info:
+        # Información del archivo actual
+        st.subheader("📋 Información")
+        st.info(f"**ACONEX:**\n{current_file['aconex']}")
+        st.info(f"**SISTEMA:**\n{current_file['sistema']}")
+        st.info(f"**SUB SISTEMA:**\n{current_file['subsistema']}")
+        
+        # Navegación compacta
+        st.subheader("🧭 Navegación")
+        
+        # Indicador de posición
         st.markdown(f"**Archivo {current_index + 1} de {len(processed_files)}**")
-        # Selector desplegable para ir directamente a un archivo
+        
+        # Botones de navegación en una cuadrícula compacta
+        nav_col1, nav_col2, nav_col3, nav_col4 = st.columns(4)
+        
+        with nav_col1:
+            if st.button("⏮️", help="Primer archivo", use_container_width=True):
+                st.session_state.current_preview_index = 0
+                st.rerun()
+        
+        with nav_col2:
+            if st.button("◀️", help="Archivo anterior", use_container_width=True, 
+                        disabled=(current_index == 0)):
+                if current_index > 0:
+                    st.session_state.current_preview_index -= 1
+                    st.rerun()
+        
+        with nav_col3:
+            if st.button("▶️", help="Siguiente archivo", use_container_width=True,
+                        disabled=(current_index == len(processed_files) - 1)):
+                if current_index < len(processed_files) - 1:
+                    st.session_state.current_preview_index += 1
+                    st.rerun()
+        
+        with nav_col4:
+            if st.button("⏭️", help="Último archivo", use_container_width=True,
+                        disabled=(current_index == len(processed_files) - 1)):
+                st.session_state.current_preview_index = len(processed_files) - 1
+                st.rerun()
+        
+        # Selector desplegable para navegación rápida
+        st.markdown("---")
         file_names = [f['filename'] for f in processed_files]
         selected_file = st.selectbox(
-            "Ir directamente a:",
+            "Ir a archivo específico:",
             file_names,
             index=current_index,
-            key="quick_nav_select",
-            label_visibility="collapsed"
+            key="quick_nav_select"
         )
         
         # Si el usuario selecciona un archivo diferente, actualizar el índice
@@ -387,12 +402,17 @@ def show_quick_preview(processed_files):
             new_index = file_names.index(selected_file)
             st.session_state.current_preview_index = new_index
             st.rerun()
-    
-    with col4:
-        if st.button("Siguiente ▶️", use_container_width=True):
-            if st.session_state.current_preview_index < len(processed_files) - 1:
-                st.session_state.current_preview_index += 1
-                st.rerun()
+        
+        # Descarga rápida del archivo actual
+        st.markdown("---")
+        st.download_button(
+            label="📥 Descargar este archivo",
+            data=current_file['bytes'],
+            file_name=current_file['filename'],
+            mime="application/pdf",
+            use_container_width=True,
+            key=f"quick_dl_{current_index}"
+        )
 
 def process_files(matched_files, position_settings):
     """Procesa los archivos y los guarda en session_state"""
@@ -615,40 +635,25 @@ def main():
                 
                 st.success(f"✅ {len(processed_files)} archivos procesados exitosamente")
                 
-                # Vista rápida
+                # Vista rápida con navegación integrada
                 show_quick_preview(processed_files)
                 
-                # Descargas
-                st.header("6. 📥 Descargar Archivos")
+                # Descargas masivas
+                st.header("6. 📥 Descargar Todos los Archivos")
                 
-                # ZIP
+                # ZIP con todos los archivos
                 zip_buffer = create_download_zip(processed_files)
                 
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 st.download_button(
-                    label=f"📦 Descargar ZIP ({len(processed_files)} archivos)",
+                    label=f"📦 Descargar ZIP completo ({len(processed_files)} archivos)",
                     data=zip_buffer,
                     file_name=f"pdfs_procesados_{timestamp}.zip",
                     mime="application/zip",
                     type="primary",
-                    key="download_zip"
+                    key="download_zip",
+                    use_container_width=True
                 )
-                
-                # Individuales (máximo 10 para mantener simple)
-                st.subheader("Descargas Individuales")
-                cols = st.columns(2)
-                for i, file_info in enumerate(processed_files[:10]):
-                    with cols[i % 2]:
-                        st.download_button(
-                            label=f"📄 {file_info['filename']}",
-                            data=file_info['bytes'],
-                            file_name=file_info['filename'],
-                            mime="application/pdf",
-                            key=f"dl_{i}"
-                        )
-                
-                if len(processed_files) > 10:
-                    st.info(f"💡 Mostrando 10 de {len(processed_files)} archivos. Descarga el ZIP para todos los archivos.")
                 
                 if errors:
                     st.error(f"❌ {len(errors)} errores:")
