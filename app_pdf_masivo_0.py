@@ -296,14 +296,14 @@ def create_download_zip(processed_files):
     zip_buffer.seek(0)
     return zip_buffer
 
-def display_pdf_preview(pdf_bytes, width=800):
+def display_pdf_preview(pdf_bytes, width=1200):
     """Muestra una vista previa rápida del PDF como imagen (solo primera página)"""
     try:
         pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
         
         # Convertir primera página a imagen
         page = pdf_document[0]
-        mat = fitz.Matrix(2.0, 2.0)  # Zoom para mejor calidad
+        mat = fitz.Matrix(4.0, 4.0)  # Zoom para mejor calidad
         pix = page.get_pixmap(matrix=mat)
         img_data = pix.tobytes("png")
         
