@@ -4,7 +4,9 @@ import fitz  # PyMuPDF
 import io
 import os
 from datetime import datetime
+import tempfile
 import zipfile
+import shutil
 
 def insert_text_in_pdf(pdf_bytes, aconex_text, sistema_text, subsistema_text, position_settings):
     """Inserta texto en un PDF en las posiciones específicas con ajustes precisos"""
@@ -80,7 +82,7 @@ def insert_text_in_pdf(pdf_bytes, aconex_text, sistema_text, subsistema_text, po
                     color=(0, 0, 0)
                 )
         
-        # Guardar el PDF modificado en memoria
+        # Guardar el PDF modificado
         output_bytes = pdf_document.tobytes()
         pdf_document.close()
         
@@ -199,6 +201,72 @@ def validate_dataframe(df):
     
     return True
 
+def select_output_folder():
+    """Permite al usuario seleccionar la carpeta de destino"""
+    st.sidebar.header("📁 Configuración de Salida")
+    
+    output_option = st.sidebar.radio(
+        "¿Dónde guardar los archivos procesados?",
+        ["Carpeta temporal (descarga ZIP)", "Seleccionar carpeta específica"]
+    )
+    
+    if output_option == "Seleccionar carpeta específica":
+        folder_path = st.sidebar.text_input(
+            "Ruta de la carpeta de destino:",
+            value="",
+            placeholder="Ej: C:/Usuarios/MiUsuario/Documentos/PDFs_Procesados"
+        )
+        
+        if folder_path:
+            if not os.path.exists(folder_path):
+                st.sidebar.info(f"La carpeta no existe. Se creará: {folder_path}")
+                try:
+                    os.makedirs(folder_path, exist_ok=True)
+                    st.sidebar.success("✅ Carpeta creada exitosamente")
+                except Exception as e:
+                    st.sidebar.error(f"❌ Error creando carpeta: {e}")
+                    return None
+            
+            try:
+                test_file = os.path.join(folder_path, "test_write.tmp")
+                with open(test_file, 'w') as f:
+                    f.write("test")
+                os.remove(test_file)
+                st.sidebar.success("✅ Permisos de escritura verificados")
+                return folder_path
+            except Exception as e:
+                st.sidebar.error(f"❌ Sin permisos de escritura en: {folder_path}")
+                return None
+        else:
+            return None
+    else:
+        return None
+
+def save_to_folder(processed_files, output_folder):
+    """Guarda los archivos procesados en la carpeta especificada"""
+    try:
+        saved_files = []
+        
+        for file_info in processed_files:
+            source_path = file_info['filepath']
+            destination_path = os.path.join(output_folder, file_info['filename'])
+            
+            shutil.copy2(source_path, destination_path)
+            
+            saved_files.append({
+                'filename': file_info['filename'],
+                'path': destination_path,
+                'aconex': file_info['aconex'],
+                'sistema': file_info['sistema'],
+                'subsistema': file_info['subsistema']
+            })
+        
+        return saved_files
+    
+    except Exception as e:
+        st.error(f"Error guardando archivos en carpeta: {str(e)}")
+        return []
+
 def get_position_settings():
     """Obtiene la configuración de posición del usuario"""
     st.sidebar.header("🎯 Ajustes de Posición")
@@ -229,7 +297,7 @@ def get_position_settings():
                 "Offset Y (puntos)",
                 min_value=-50.0,
                 max_value=50.0,
-                value=2.0,
+                value=2.5,
                 step=0.5,
                 help="Desplazamiento vertical desde la etiqueta"
             )
@@ -239,7 +307,7 @@ def get_position_settings():
                 "Tamaño fuente",
                 min_value=6.0,
                 max_value=20.0,
-                value=7.0,
+                value=7.5,
                 step=0.5,
                 help="Tamaño de la fuente en puntos"
             )
@@ -283,205 +351,7 @@ def get_position_settings():
             subsistema_y = st.number_input("SUB SISTEMA Y", value=140.0, step=1.0)
         position_settings['custom_positions']['subsistema'] = {'x': subsistema_x, 'y': subsistema_y}
     
-    # 🔥 NUEVA SECCIÓN: Control de zoom para vista previa
-    st.sidebar.header("🔍 Ajustes de Vista Previa")
-    zoom_level = st.sidebar.slider(
-        "Nivel de zoom:",
-        min_value=1.0,
-        max_value=3.0,
-        value=2.0,
-        step=0.5,
-        help="Ajusta el nivel de zoom para la vista previa de PDF"
-    )
-    position_settings['zoom_level'] = zoom_level
-    
     return position_settings
-
-def create_download_zip(processed_files):
-    """Crea un archivo ZIP en memoria para descargar"""
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w") as zip_file:
-        for file_info in processed_files:
-            # Agregar archivo al ZIP desde bytes
-            zip_file.writestr(file_info['filename'], file_info['bytes'])
-    
-    zip_buffer.seek(0)
-    return zip_buffer
-
-def display_pdf_preview(pdf_bytes, width=1000, zoom=2.0):
-    """Muestra una vista previa rápida del PDF como imagen (solo primera página)"""
-    try:
-        pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
-        
-        # Convertir primera página a imagen
-        page = pdf_document[0]
-        mat = fitz.Matrix(zoom, zoom)  # 🔥 ZOOM AJUSTABLE
-        pix = page.get_pixmap(matrix=mat)
-        img_data = pix.tobytes("png")
-        
-        pdf_document.close()
-        
-        # Mostrar imagen
-        st.image(img_data, caption=f"Vista previa rápida - Zoom: {zoom}x", width=width)
-        return True
-        
-    except Exception as e:
-        st.error(f"Error generando vista previa: {str(e)}")
-        return False
-
-def show_quick_preview(processed_files, zoom_level=2.0):
-    """Muestra una vista rápida de los archivos procesados con navegación integrada"""
-    st.header("👀 Vista Rápida de Resultados")
-    
-    if not processed_files:
-        st.warning("No hay archivos procesados para mostrar")
-        return
-    
-    # Inicializar el índice actual en session_state si no existe
-    if 'current_preview_index' not in st.session_state:
-        st.session_state.current_preview_index = 0
-    
-    # Asegurarse de que el índice esté dentro de los límites
-    if st.session_state.current_preview_index >= len(processed_files):
-        st.session_state.current_preview_index = 0
-    
-    # Obtener el archivo actual
-    current_index = st.session_state.current_preview_index
-    current_file = processed_files[current_index]
-    
-    # Crear dos columnas: una para la vista previa y otra para la información/navegación
-    col_preview, col_info = st.columns([2, 1])
-    
-    with col_preview:
-        # Vista previa rápida CON ZOOM
-        st.markdown(f"**📄 {current_file['filename']}**")
-        if display_pdf_preview(current_file['bytes'], width=500, zoom=zoom_level):
-            st.success("✅ Vista previa generada correctamente")
-    
-    with col_info:
-        # Información del archivo actual
-        st.subheader("📋 Información")
-        st.info(f"**ACONEX:**\n{current_file['aconex']}")
-        st.info(f"**SISTEMA:**\n{current_file['sistema']}")
-        st.info(f"**SUB SISTEMA:**\n{current_file['subsistema']}")
-        
-        # Navegación compacta
-        st.subheader("🧭 Navegación")
-        
-        # Indicador de posición
-        st.markdown(f"**Archivo {current_index + 1} de {len(processed_files)}**")
-        
-        # Botones de navegación en una cuadrícula compacta
-        nav_col1, nav_col2, nav_col3, nav_col4 = st.columns(4)
-        
-        with nav_col1:
-            if st.button("⏮️", help="Primer archivo", use_container_width=True):
-                st.session_state.current_preview_index = 0
-                st.rerun()
-        
-        with nav_col2:
-            if st.button("◀️", help="Archivo anterior", use_container_width=True, 
-                        disabled=(current_index == 0)):
-                if current_index > 0:
-                    st.session_state.current_preview_index -= 1
-                    st.rerun()
-        
-        with nav_col3:
-            if st.button("▶️", help="Siguiente archivo", use_container_width=True,
-                        disabled=(current_index == len(processed_files) - 1)):
-                if current_index < len(processed_files) - 1:
-                    st.session_state.current_preview_index += 1
-                    st.rerun()
-        
-        with nav_col4:
-            if st.button("⏭️", help="Último archivo", use_container_width=True,
-                        disabled=(current_index == len(processed_files) - 1)):
-                st.session_state.current_preview_index = len(processed_files) - 1
-                st.rerun()
-        
-        # Selector desplegable para navegación rápida
-        st.markdown("---")
-        file_names = [f['filename'] for f in processed_files]
-        selected_file = st.selectbox(
-            "Ir a archivo específico:",
-            file_names,
-            index=current_index,
-            key="quick_nav_select"
-        )
-        
-        # Si el usuario selecciona un archivo diferente, actualizar el índice
-        if selected_file != file_names[current_index]:
-            new_index = file_names.index(selected_file)
-            st.session_state.current_preview_index = new_index
-            st.rerun()
-        
-        # Descarga rápida del archivo actual
-        st.markdown("---")
-        st.download_button(
-            label="📥 Descargar este archivo",
-            data=current_file['bytes'],
-            file_name=current_file['filename'],
-            mime="application/pdf",
-            use_container_width=True,
-            key=f"quick_dl_{current_index}"
-        )
-
-def process_files(matched_files, position_settings):
-    """Procesa los archivos y los guarda en session_state"""
-    st.header("📊 Procesando Archivos...")
-    
-    progress_bar = st.progress(0)
-    processed_files = []
-    errors = []
-    
-    for i, match_info in enumerate(matched_files):
-        progress = (i + 1) / len(matched_files)
-        progress_bar.progress(progress)
-        
-        try:
-            pdf_bytes = match_info['file'].getvalue()
-            
-            # Preparar datos de texto
-            text_data = {
-                'aconex': match_info['aconex'],
-                'sistema': match_info['sistema'],
-                'subsistema': match_info['subsistema']
-            }
-            
-            # Usar inserción precisa si hay coordenadas personalizadas
-            if 'custom_positions' in position_settings:
-                modified_pdf_bytes = insert_text_precise(pdf_bytes, text_data, position_settings)
-            else:
-                modified_pdf_bytes = insert_text_in_pdf(
-                    pdf_bytes, 
-                    match_info['aconex'], 
-                    match_info['sistema'], 
-                    match_info['subsistema'],
-                    position_settings
-                )
-            
-            if modified_pdf_bytes:
-                processed_files.append({
-                    'filename': match_info['name'],
-                    'aconex': match_info['aconex'],
-                    'sistema': match_info['sistema'],
-                    'subsistema': match_info['subsistema'],
-                    'bytes': modified_pdf_bytes
-                })
-                
-                st.sidebar.success(f"✅ {match_info['name']}")
-            else:
-                errors.append(f"{match_info['name']}")
-                
-        except Exception as e:
-            errors.append(f"{match_info['name']}: {str(e)}")
-    
-    # Guardar en session_state
-    st.session_state.processed_files = processed_files
-    st.session_state.processing_errors = errors
-    st.session_state.processing_complete = True
-    
-    return processed_files, errors
 
 def main():
     st.set_page_config(
@@ -490,20 +360,13 @@ def main():
         layout="wide"
     )
     
-    st.title("🎯 Procesador Masivo de PDFs")
+    st.title("🎯 Procesador Masivo de PDFs - Posicionamiento Preciso")
     st.markdown("""
-    **Procesa múltiples archivos PDF y verifica los resultados antes de descargar.**
+    Esta aplicación procesa múltiples archivos PDF con control preciso sobre la posición de los datos insertados.
     """)
     
-    # Inicializar session_state
-    if 'processed_files' not in st.session_state:
-        st.session_state.processed_files = []
-    if 'processing_complete' not in st.session_state:
-        st.session_state.processing_complete = False
-    if 'processing_errors' not in st.session_state:
-        st.session_state.processing_errors = []
-    
     # Configuraciones del sidebar
+    output_folder = select_output_folder()
     position_settings = get_position_settings()
     
     # Cargar archivo Excel
@@ -511,8 +374,7 @@ def main():
     excel_file = st.file_uploader(
         "Sube el archivo Listado.xlsx", 
         type=["xlsx"],
-        help="Debe contener las columnas: ACONEX, SISTEMA, SUB SISTEMA",
-        key="excel_uploader"
+        help="Debe contener las columnas: ACONEX, SISTEMA, SUB SISTEMA"
     )
     
     df = None
@@ -524,7 +386,7 @@ def main():
             if validate_dataframe(df):
                 st.dataframe(df.head(10), use_container_width=True)
                 
-                # Mostrar estadísticas básicas
+                # Mostrar estadísticas
                 col1, col2, col3 = st.columns(3)
                 with col1:
                     st.metric("Total registros", len(df))
@@ -543,15 +405,14 @@ def main():
         "Selecciona múltiples archivos PDF",
         type=["pdf"],
         accept_multiple_files=True,
-        help="Selecciona todos los PDFs que quieres procesar",
-        key="pdf_uploader"
+        help="Selecciona todos los PDFs que quieres procesar"
     )
     
     if pdf_files and df is not None and validate_dataframe(df):
         st.success(f"✅ {len(pdf_files)} archivos PDF cargados")
         
-        # Análisis avanzado de coordenadas (opcional)
-        if st.checkbox("🔍 Análisis Avanzado de Coordenadas", help="Opcional: Analiza las posiciones exactas en el PDF"):
+        # Análisis avanzado de coordenadas
+        if st.checkbox("🔍 Análisis Avanzado de Coordenadas", help="Analiza las posiciones exactas en el PDF"):
             st.subheader("Análisis de Coordenadas del Primer PDF")
             
             sample_texts = {
@@ -569,9 +430,14 @@ def main():
                     
                     for field_name, field_data in page_analysis['fields'].items():
                         if field_data.get('found'):
-                            st.write(f"  - **{field_name}:** Encontrado en ({field_data['x']:.1f}, {field_data['y']:.1f})")
+                            st.write(f"  - **{field_name}:**")
+                            st.write(f"    - Posición: ({field_data['x']:.1f}, {field_data['y']:.1f})")
+                            st.write(f"    - Tamaño: {field_data['width']:.1f} × {field_data['height']:.1f}")
+                            st.write(f"    - Sugerido: ({field_data['suggested_x']:.1f}, {field_data['suggested_y']:.1f})")
                         else:
                             st.write(f"  - **{field_name}:** ❌ No encontrado")
+                    
+                    st.write("---")
             
             # Reset del archivo
             pdf_files[0].seek(0)
@@ -613,6 +479,9 @@ def main():
         
         with col1:
             st.success(f"✅ {len(matched_files)} archivos emparejados")
+            if matched_files:
+                for match in matched_files[:3]:
+                    st.write(f"📄 **{match['name']}**")
         
         with col2:
             if unmatched_files:
@@ -622,65 +491,124 @@ def main():
         if matched_files:
             st.header("4. ⚙️ Procesar Archivos")
             
-            # Mostrar configuración actual de forma simple
-            st.info("**Configuración actual:**")
+            # Mostrar configuración actual
+            st.info(f"🎯 **Configuración de posicionamiento:**")
             if 'custom_positions' in position_settings:
-                st.write("Usando coordenadas manuales")
+                st.write("**Coordenadas manuales:**")
+                for field, pos in position_settings['custom_positions'].items():
+                    st.write(f"  - {field.upper()}: ({pos['x']}, {pos['y']})")
             else:
-                st.write(f"Offsets: X={position_settings['x_offset']}, Y={position_settings['y_offset']}")
-            st.write(f"Tamaño de fuente: {position_settings['font_size']}")
-            st.write(f"Zoom vista previa: {position_settings.get('zoom_level', 2.0)}x")
+                st.write(f"**Offsets automáticos:** X: {position_settings['x_offset']}, Y: {position_settings['y_offset']}")
+            st.write(f"**Tamaño de fuente:** {position_settings['font_size']}")
             
-            # Botón de procesamiento
-            if st.button("🚀 Iniciar Procesamiento", type="primary", key="process_btn"):
-                # Reiniciar el estado de vista previa
-                if 'current_preview_index' in st.session_state:
-                    st.session_state.current_preview_index = 0
-                
-                processed_files, errors = process_files(matched_files, position_settings)
+            if output_folder:
+                st.info(f"📁 **Destino:** `{output_folder}`")
             
-            # Mostrar resultados si el procesamiento está completo
-            if st.session_state.processing_complete and st.session_state.processed_files:
-                st.header("5. ✅ Resultados Finales")
+            if st.button("🚀 Iniciar Procesamiento con Ajustes Actuales", type="primary"):
+                st.header("5. 📊 Procesando Archivos...")
                 
-                processed_files = st.session_state.processed_files
-                errors = st.session_state.processing_errors
-                
-                st.success(f"✅ {len(processed_files)} archivos procesados exitosamente")
-                
-                # Vista rápida con navegación integrada Y ZOOM
-                show_quick_preview(processed_files, zoom_level=position_settings.get('zoom_level', 2.0))
-                
-                # Descargas masivas
-                st.header("6. 📥 Descargar Todos los Archivos")
-                
-                # ZIP con todos los archivos
-                zip_buffer = create_download_zip(processed_files)
-                
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                st.download_button(
-                    label=f"📦 Descargar ZIP completo ({len(processed_files)} archivos)",
-                    data=zip_buffer,
-                    file_name=f"pdfs_procesados_{timestamp}.zip",
-                    mime="application/zip",
-                    type="primary",
-                    key="download_zip",
-                    use_container_width=True
-                )
-                
-                if errors:
-                    st.error(f"❌ {len(errors)} errores:")
-                    for error in errors:
-                        st.write(f"- {error}")
-            
-            # Botón para resetear si es necesario
-            if st.session_state.processing_complete:
-                if st.button("🔄 Procesar Nuevos Archivos", type="secondary"):
-                    # Limpiar session_state
-                    for key in ['processed_files', 'processing_complete', 'processing_errors', 'current_preview_index']:
-                        if key in st.session_state:
-                            del st.session_state[key]
-                    st.rerun()
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    progress_bar = st.progress(0)
+                    
+                    processed_files = []
+                    errors = []
+                    
+                    for i, match_info in enumerate(matched_files):
+                        progress = (i + 1) / len(matched_files)
+                        progress_bar.progress(progress)
+                        
+                        try:
+                            pdf_bytes = match_info['file'].getvalue()
+                            
+                            # Preparar datos de texto
+                            text_data = {
+                                'aconex': match_info['aconex'],
+                                'sistema': match_info['sistema'],
+                                'subsistema': match_info['subsistema']
+                            }
+                            
+                            # Usar inserción precisa si hay coordenadas personalizadas
+                            if 'custom_positions' in position_settings:
+                                modified_pdf_bytes = insert_text_precise(pdf_bytes, text_data, position_settings)
+                            else:
+                                modified_pdf_bytes = insert_text_in_pdf(
+                                    pdf_bytes, 
+                                    match_info['aconex'], 
+                                    match_info['sistema'], 
+                                    match_info['subsistema'],
+                                    position_settings
+                                )
+                            
+                            if modified_pdf_bytes:
+                                filename = match_info['name']
+                                filepath = os.path.join(temp_dir, filename)
+                                
+                                with open(filepath, "wb") as f:
+                                    f.write(modified_pdf_bytes)
+                                
+                                processed_files.append({
+                                    'filename': filename,
+                                    'aconex': match_info['aconex'],
+                                    'sistema': match_info['sistema'],
+                                    'subsistema': match_info['subsistema'],
+                                    'filepath': filepath
+                                })
+                                
+                                st.sidebar.success(f"✅ {match_info['name']}")
+                            else:
+                                errors.append(f"{match_info['name']}")
+                                
+                        except Exception as e:
+                            errors.append(f"{match_info['name']}: {str(e)}")
+                    
+                    # Resultados
+                    st.header("6. ✅ Resultados Finales")
+                    
+                    if processed_files:
+                        st.success(f"✅ {len(processed_files)} archivos procesados")
+                        
+                        # Guardar en carpeta
+                        if output_folder and processed_files:
+                            saved_files = save_to_folder(processed_files, output_folder)
+                            if saved_files:
+                                st.success(f"📁 {len(saved_files)} archivos guardados en: `{output_folder}`")
+                        
+                        # Descargas
+                        st.header("7. 📥 Descargar Archivos")
+                        
+                        # ZIP
+                        zip_buffer = io.BytesIO()
+                        with zipfile.ZipFile(zip_buffer, "w") as zip_file:
+                            for file_info in processed_files:
+                                zip_file.write(file_info['filepath'], file_info['filename'])
+                        
+                        zip_buffer.seek(0)
+                        
+                        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                        st.download_button(
+                            label=f"📦 Descargar ZIP ({len(processed_files)} archivos)",
+                            data=zip_buffer,
+                            file_name=f"pdfs_procesados_{timestamp}.zip",
+                            mime="application/zip",
+                            type="primary"
+                        )
+                        
+                        # Individuales
+                        st.subheader("Descargas Individuales")
+                        for i, file_info in enumerate(processed_files[:5]):
+                            with open(file_info['filepath'], "rb") as f:
+                                st.download_button(
+                                    label=f"📄 {file_info['filename']}",
+                                    data=f,
+                                    file_name=file_info['filename'],
+                                    mime="application/pdf",
+                                    key=f"dl_{i}"
+                                )
+                    
+                    if errors:
+                        st.error(f"❌ {len(errors)} errores:")
+                        for error in errors:
+                            st.write(f"- {error}")
 
 if __name__ == "__main__":
     main()
